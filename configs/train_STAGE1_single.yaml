@@ -1,0 +1,51 @@
+task_type: 'enhancement'  # default task for visualization
+
+task_weights:
+  enhancement: 1.0
+
+num_val_visualizations_per_task: 10
+
+# Optional: if omitted for a task, args.pos_prompt will be used.
+task_prompts: null
+  # enhancement: ''
+
+hyper_parameters:
+  stage: Stage1
+  N_timesteps: 20
+  lora_rank_vae: 16
+  lora_rank_unet: 32
+  prompt_len: 1
+  current_task: 'enhancement'
+  task_list: ['enhancement']
+
+train:
+  enhancement:
+    task_type: enhancement
+    queue_size: 180
+    degradation_synthetic: True
+
+    dataroot_gt: ['path/to/MH-TIR/train_GT']
+    dataroot_lq: ['path/to/MH-TIR/train_GT']
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: True
+    use_rot: False
+
+
+validation:
+  enhancement:
+    task_type: enhancement
+    degradation_synthetic: True
+
+    dataroot_gt: path/to/MH-TIR/test_GT
+    dataroot_lq: path/to/MH-TIR/test_GT
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: True
+    use_rot: False

@@ -1,0 +1,149 @@
+task_type: 'enhancement'  # default task for visualization
+
+task_weights:
+  enhancement: 0.4
+  detection: 0.2
+  small_targets: 0.2
+  segmentation: 0.2
+
+num_val_visualizations_per_task: 10
+
+# Optional: if omitted for a task, args.pos_prompt will be used.
+task_prompts: null
+  # enhancement: ''
+  # detection: ''
+  # segmentation: ''
+  # small_targets: ''
+
+hyper_parameters:
+  stage: Stage2
+  N_timesteps: 20
+  lora_rank_vae: 16
+  lora_rank_unet: 32
+  prompt_len: 1
+  current_task: ${task_type}
+  task_list: ['enhancement', 'detection', 'small_targets', 'segmentation']
+
+train:
+  enhancement:
+    task_type: enhancement
+    queue_size: 180
+    degradation_synthetic: True
+
+    dataroot_gt: ['path/to/MH-TIR/train_GT']
+    dataroot_lq: ['path/to/MH-TIR/train_GT']
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: True
+    use_rot: False
+
+  detection:
+    task_type: detection
+    queue_size: 180
+    degradation_synthetic: True
+
+    dataroot_gt: ['path/to/M3FD/images/train']
+    dataroot_lq: ['path/to/M3FD/images/train']
+    dataroot_label: ['path/to/M3FD/labels/train']
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: True
+    use_rot: False
+
+  small_targets:
+    task_type: small_targets
+    queue_size: 180
+    degradation_synthetic: True
+
+    dataroot_gt: ['path/to/SIRST3/imgs/train']
+    dataroot_lq: ['path/to/SIRST3/imgs/train']
+    dataroot_label: ['path/to/SIRST3/masks_train']
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: True
+    use_rot: False
+
+  segmentation:
+    task_type: segmentation
+    queue_size: 180
+    degradation_synthetic: True
+
+    dataroot_gt: ['path/to/FMB/train/Infrared']
+    dataroot_lq: ['path/to/FMB/train/Infrared']
+    dataroot_label: ['path/to/FMB/train/Label']
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: True
+    use_rot: False
+
+validation:
+  enhancement:
+    task_type: enhancement
+    degradation_synthetic: True
+
+    dataroot_gt: path/to/MH-TIR/test_GT
+    dataroot_lq: path/to/MH-TIR/test_GT
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: True
+    use_rot: False
+
+  detection:
+    task_type: detection
+    degradation_synthetic: True
+
+    dataroot_gt: path/to/M3FD/images/val
+    dataroot_lq: path/to/M3FD/images/val
+    dataroot_label: path/to/M3FD/labels/val
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: False
+    use_rot: False
+
+  small_targets:
+    task_type: small_targets
+    degradation_synthetic: True
+
+    dataroot_gt: path/to/SIRST3/imgs/val
+    dataroot_lq: path/to/SIRST3/imgs/val
+    dataroot_label: path/to/SIRST3/masks_val
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: False
+    use_rot: False
+
+  segmentation:
+    task_type: segmentation
+    degradation_synthetic: True
+
+    dataroot_gt: path/to/FMB/val/Infrared
+    dataroot_lq: path/to/FMB/val/Infrared
+    dataroot_label: path/to/FMB/val/Label
+
+    crop_size: 512
+    io_backend:
+      type: disk
+
+    use_hflip: False
+    use_rot: False

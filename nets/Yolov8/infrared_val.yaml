@@ -1,0 +1,10 @@
+path: ./output/det_vis/tmp_dataset
+train: images/val
+val: images/val
+names:
+  0: People
+  1: Car
+  2: Bus
+  3: Motorcycle
+  4: Lamp
+  5: Truck

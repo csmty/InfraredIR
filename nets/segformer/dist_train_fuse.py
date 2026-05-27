@@ -1,0 +1,338 @@
+import argparse
+import datetime
+import logging
+import os
+import random
+
+import numpy as np
+import torch
+import torch.distributed as dist
+import torch.nn.functional as F
+from omegaconf import OmegaConf
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
+from tqdm import tqdm
+
+from core.model import WeTr
+from datasets import voc, fmb_fuse # fmb
+from utils import eval_seg
+from utils.optimizer import PolyWarmupAdamW
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--config",
+                    default='/data/matengyu/code/@submit/Infrared/CVPR26/S3Diff/segformer/configs/fmb.yaml',
+                    type=str,
+                    help="config")
+parser.add_argument('--pretrained', type=str, default='/data/matengyu/code/@submit/Infrared/CVPR26/S3Diff/segformer/checkpoints/best_model.pth', help="已有模型路径，用于微调")
+# parser.add_argument("--local_rank", default=-1, type=int, help="local_rank")
+# parser.add_argument('--backend', default='nccl')
+
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+def setup_logger(filename='test.log'):
+    ## setup logger
+    #logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s - %(levelname)s: %(message)s') 
+    logFormatter = logging.Formatter('%(asctime)s - %(filename)s - %(levelname)s: %(message)s')
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    fHandler = logging.FileHandler(filename, mode='w')
+    fHandler.setFormatter(logFormatter)
+    logger.addHandler(fHandler)
+
+    cHandler = logging.StreamHandler()
+    cHandler.setFormatter(logFormatter)
+    logger.addHandler(cHandler)
+
+
+
+def cal_eta(time0, cur_iter, total_iter):
+    time_now = datetime.datetime.now()
+    time_now = time_now.replace(microsecond=0)
+    #time_now = datetime.datetime.strptime(time_now.strftime('%Y-%m-%d %H:%M:%S'), '%Y-%m-%d %H:%M:%S')
+
+    scale = (total_iter-cur_iter) / float(cur_iter)
+    delta = (time_now - time0)
+    eta = (delta*scale)
+    time_fin = time_now + eta
+    eta = time_fin.replace(microsecond=0) - time_now
+    return str(delta), str(eta)
+
+def validate(model=None, criterion=None, data_loader=None, device=None):
+
+    val_loss = 0.0
+    preds, gts = [], []
+    model.eval()
+
+    with torch.no_grad():
+        for _, data in tqdm(enumerate(data_loader),
+                            total=len(data_loader), ncols=100, ascii=" >="):
+            _, inputs, labels = data
+
+            #inputs = inputs.to()
+            #labels = labels.to(inputs.device)
+
+            # outputs = model(inputs)
+            # labels = labels.long().to(outputs.device)
+
+            inputs = inputs.to(device, non_blocking=True)
+            labels = labels.long().to(device)
+
+            outputs = model(inputs)
+
+            resized_outputs = F.interpolate(outputs,
+                                            size=labels.shape[1:],
+                                            mode='bilinear',
+                                            align_corners=False)
+
+            loss = criterion(resized_outputs, labels)
+            val_loss += loss
+
+            preds += list(
+                torch.argmax(resized_outputs,
+                             dim=1).cpu().numpy().astype(np.int16))
+            gts += list(labels.cpu().numpy().astype(np.int16))
+
+    score = eval_seg.scores(gts, preds)
+
+    return val_loss.cpu().numpy() / float(len(data_loader)), score
+
+def train(cfg, pretrained_path=None):
+    save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints_fuse_Ours_FMB_2")
+    os.makedirs(save_dir, exist_ok=True)
+    logging.info(f"Model checkpoints will be saved to {save_dir}")
+
+    num_workers = 4
+    best_miou = 0.0 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logging.info(f"Using device: {device}")
+
+    # torch.cuda.set_device(args.local_rank)
+    # dist.init_process_group(backend=args.backend,)
+    time0 = datetime.datetime.now()
+    time0 = time0.replace(microsecond=0)
+    
+    train_dataset = fmb_fuse.FMBDataset(
+        root_dir=cfg.dataset.root_dir + f'/train',
+        split=cfg.train.split,
+        stage='train',
+        aug=True,
+        resize_range=cfg.dataset.resize_range,
+        rescale_range=cfg.dataset.rescale_range,
+        crop_size=cfg.dataset.crop_size,
+        img_fliplr=True,
+        ignore_index=cfg.dataset.ignore_index,
+    )
+    
+    val_dataset = fmb_fuse.FMBDataset(
+        root_dir=cfg.dataset.root_dir + f'/val',
+        split=cfg.val.split,
+        stage='val',
+        aug=False,
+        ignore_index=cfg.dataset.ignore_index,
+    )
+    
+    print(len(train_dataset))
+    print(len(val_dataset))
+    
+    # train_sampler = DistributedSampler(train_dataset,shuffle=True)
+    train_loader = DataLoader(train_dataset,
+                              batch_size=cfg.train.samples_per_gpu,
+                              shuffle=True,
+                              num_workers=num_workers,
+                              pin_memory=True,
+                              drop_last=True,
+                              # sampler=train_sampler,
+                              prefetch_factor=4)
+
+    val_loader = DataLoader(val_dataset,
+                            batch_size=1,
+                            shuffle=False,
+                            num_workers=num_workers,
+                            pin_memory=True,
+                            drop_last=False)
+    '''
+    if torch.cuda.is_available() is True:
+        device = torch.device('cuda')
+        print('%d GPUs are available:'%(torch.cuda.device_count()))
+    else:
+        print('Using CPU:')
+        device = torch.device('cpu')
+    '''
+    # device = torch.device(args.local_rank)
+    wetr = WeTr(backbone=cfg.exp.backbone,
+                num_classes=cfg.dataset.num_classes,
+                embedding_dim=256,
+                pretrained=True)
+    param_groups = wetr.get_param_groups()
+    
+    
+    # 加载已有模型权重进行微调
+    if pretrained_path is not None and os.path.exists(pretrained_path):
+        checkpoint = torch.load(pretrained_path, map_location='cpu', weights_only=False)
+        if 'model_state_dict' in checkpoint:
+            wetr.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            wetr.load_state_dict(checkpoint)
+
+    wetr = wetr.to(device)
+    
+    optimizer = PolyWarmupAdamW(
+        params=[
+            {
+                "params": param_groups[0],
+                "lr": cfg.optimizer.learning_rate,
+                "weight_decay": cfg.optimizer.weight_decay,
+            },
+            {
+                "params": param_groups[1],
+                "lr": cfg.optimizer.learning_rate,
+                "weight_decay": 0.0,
+            },
+            {
+                "params": param_groups[2],
+                "lr": cfg.optimizer.learning_rate * 10,
+                "weight_decay": cfg.optimizer.weight_decay,
+            },
+        ],
+        lr = cfg.optimizer.learning_rate,
+        weight_decay = cfg.optimizer.weight_decay,
+        betas = cfg.optimizer.betas,
+        warmup_iter = cfg.scheduler.warmup_iter,
+        max_iter = cfg.train.max_iters,
+        warmup_ratio = cfg.scheduler.warmup_ratio,
+        power = cfg.scheduler.power
+    )
+    #wetr, optimizer = amp.initialize(wetr, optimizer, opt_level="O1")
+    # wetr = DistributedDataParallel(wetr, device_ids=[args.local_rank], find_unused_parameters=True)
+    # criterion
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=cfg.dataset.ignore_index)
+    criterion = criterion.to(device)
+
+    # train_sampler.set_epoch(0)
+    train_loader_iter = iter(train_loader)
+
+    #for n_iter in tqdm(range(cfg.train.max_iters), total=cfg.train.max_iters, dynamic_ncols=True):
+    for n_iter in range(cfg.train.max_iters):
+        
+        try:
+            _, inputs, labels = next(train_loader_iter)
+        except:
+            # train_sampler.set_epoch(n_iter)
+            train_loader_iter = iter(train_loader)
+            _, inputs, labels = next(train_loader_iter)
+
+        inputs = inputs.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
+
+        outputs = wetr(inputs)
+        outputs = F.interpolate(outputs, size=labels.shape[1:], mode='bilinear', align_corners=False)
+        seg_loss = criterion(outputs, labels.type(torch.long))
+
+        optimizer.zero_grad()
+        seg_loss.backward()
+        optimizer.step()
+        
+        # if (n_iter+1) % cfg.train.log_iters == 0 and args.local_rank==0:
+        if (n_iter+1) % cfg.train.log_iters == 0:
+            delta, eta = cal_eta(time0, n_iter+1, cfg.train.max_iters)
+            lr = optimizer.param_groups[0]['lr']
+            logging.info("Iter: %d; Elasped: %s; ETA: %s; LR: %.3e; seg_loss: %f"%(n_iter+1, delta, eta, lr, seg_loss.item()))
+        
+        if (n_iter+1) % cfg.train.eval_iters == 0:
+            # if args.local_rank==0:
+            #     logging.info('Validating...')
+            # val_loss, val_score = validate(model=wetr, criterion=criterion, data_loader=val_loader)
+            # if args.local_rank==0:
+            #     logging.info(val_score)
+                
+            #     cur_miou = val_score['Mean IoU']
+            #     if cur_miou > best_miou:
+            #         best_miou = cur_miou
+            #         checkpoint = {
+            #             'iter': n_iter + 1,
+            #             'model_state_dict': wetr.module.state_dict(),
+            #             'optimizer_state_dict': optimizer.state_dict(),
+            #             'best_miou': best_miou,
+            #             'val_score': val_score
+            #         }
+            #         torch.save(checkpoint, os.path.join(save_dir, 'best_model.pth'))
+            #         logging.info(f'Saved best model with mIoU: {best_miou:.4f}')
+                
+                # if (n_iter + 1) % (cfg.train.eval_iters * 1) == 0: 
+                #     checkpoint = {
+                #         'iter': n_iter + 1,
+                #         'model_state_dict': wetr.module.state_dict(),
+                #         'optimizer_state_dict': optimizer.state_dict(),
+                #         'val_score': val_score
+                #     }
+                #     torch.save(checkpoint, os.path.join(save_dir, f'checkpoint_iter_{n_iter+1}.pth'))
+                #     logging.info(f'Saved checkpoint at iteration {n_iter+1}')
+
+            logging.info('Validating...')
+            val_loss, val_score = validate(model=wetr, criterion=criterion, data_loader=val_loader, device=device)
+            logging.info(f"Validation score: {val_score}")
+
+            cur_miou = val_score['Mean IoU']
+            if cur_miou > best_miou:
+                best_miou = cur_miou
+                checkpoint = {
+                    'iter': n_iter + 1,
+                    'model_state_dict': wetr.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'best_miou': best_miou,
+                    'val_score': val_score
+                }
+                torch.save(checkpoint, os.path.join(save_dir, 'best_model.pth'))
+                logging.info(f"Saved best model with mIoU: {best_miou:.4f}")
+
+                checkpoint = {
+                    'iter': n_iter + 1,
+                    'model_state_dict': wetr.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_score': val_score
+                }
+                torch.save(checkpoint, os.path.join(save_dir, f'checkpoint_iter_{n_iter+1}.pth'))
+
+    # if args.local_rank == 0:
+    #     checkpoint = {
+    #         'iter': cfg.train.max_iters,
+    #         'model_state_dict': wetr.module.state_dict(),
+    #         'optimizer_state_dict': optimizer.state_dict(),
+    #         'val_score': val_score
+    #     }
+    #     torch.save(checkpoint, os.path.join(save_dir, 'final_model.pth'))
+    #     logging.info('Saved final model')
+    checkpoint = {
+        'iter': cfg.train.max_iters,
+        'model_state_dict': wetr.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'val_score': val_score
+    }
+    torch.save(checkpoint, os.path.join(save_dir, 'final_model.pth'))
+    logging.info('Saved final model')
+
+    return True
+
+
+if __name__ == "__main__":
+
+    args = parser.parse_args()
+    cfg = OmegaConf.load(args.config)
+
+    # if args.local_rank == 0:
+    #     setup_logger()
+    #     logging.info('\nconfigs: %s' % cfg)
+    # setup_seed(1)
+
+    setup_logger()
+    logging.info(f"\nConfigs: {cfg}")
+
+    setup_seed(1)
+    train(cfg=cfg, pretrained_path=args.pretrained)
