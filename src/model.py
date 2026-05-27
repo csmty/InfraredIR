@@ -326,14 +326,16 @@ class InfraredIR(torch.nn.Module):
                     _p.requires_grad = True
 
         elif self.stage == 'Stage2':
-            # Stage2: VAE decoder LoRA + task prompts
+            # Stage2: Task prompts
             self.unet.eval()
             self.fuser.eval()
             self.t_head.eval()
             self.prompt_mlp.eval()
             
-            self.vae.train()
+            ## You can choose to fine-tune VAE decoder LoRA in Stage 2, or keep it frozen and only train the task prompts
+            ## In fact, fine-tuning the VAE decoder LoRA in Stage 2 may lead to better performance
 
+            self.vae.eval()
             # for n, _p in self.vae.named_parameters():
             #     if "lora" in n and "decoder" in n:
             #         _p.requires_grad = True
