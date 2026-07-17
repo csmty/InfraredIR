@@ -300,19 +300,22 @@ def main(args):
                 task_prompt = get_task_prompt(task_prompts, task_type, args.pos_prompt)
                 pos_tag_prompt = [task_prompt for _ in range(B)]
 
-                x_tgt_pred, loss_snr = net_iir(
-                    x_src.detach(),
-                    pos_tag_prompt,
-                    hq_for_snr=x_tgt.detach(),
-                    in_latent=False,
-                )
+                if STAGE == 'Stage1':
+                    x_tgt_pred, loss_snr = net_iir(
+                        x_src.detach(),
+                        pos_tag_prompt,
+                        hq_for_snr=x_tgt.detach(),
+                        in_latent=False,
+                    )
+                else:
+                    x_tgt_pred = net_iir(x_src.detach(), pos_tag_prompt)
+                    loss_snr = torch.zeros((), device=x_src.device, dtype=x_src.dtype)
 
                 loss_l2 = F.mse_loss(x_tgt_pred.float(), x_tgt.detach().float(), reduction="mean",) * args.lambda_l2
                 loss_lpips = net_lpips(x_tgt_pred.float(), x_tgt.detach().float(),).mean() * args.lambda_lpips
                 loss_dwt = dwt_loss(x_tgt_pred.float(), x_tgt.detach().float())
-                if global_step > 100:
-                    lambda_snr = 0
-                loss_snr = loss_snr * lambda_snr
+                effective_lambda_snr = lambda_snr if STAGE == 'Stage1' and global_step <= 10000 else 0.0
+                loss_snr = loss_snr * effective_lambda_snr
 
                 if task_type == "enhancement":
                     loss_task = torch.zeros((), device=x_tgt_pred.device, dtype=x_tgt_pred.dtype)
