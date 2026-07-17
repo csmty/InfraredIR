@@ -44,6 +44,11 @@ def my_lora_fwd(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tenso
             x = x.to(lora_A.weight.dtype)
 
             if not self.use_dora[active_adapter]:
+                if not hasattr(self, "de_mod"):
+                    raise RuntimeError(
+                        "Prompt-modulated LoRA was called before `de_mod` was set. "
+                        "Call `_apply_prompt_lora_modulation` before forwarding through this module."
+                    )
                 _tmp = lora_A(dropout(x))
                 if isinstance(lora_A, torch.nn.Conv2d):
                     _tmp = torch.einsum('...khw,...kr->...rhw', _tmp, self.de_mod)
@@ -78,4 +83,3 @@ def download_url(url, outf):
         print(f"Downloaded successfully to {outf}")
     else:
         print(f"Skipping download, {outf} already exists")
-

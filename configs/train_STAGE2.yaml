@@ -1,10 +1,10 @@
 task_type: 'enhancement'  # default task for visualization
 
 task_weights:
-  enhancement: 0.4
-  detection: 0.2
-  small_targets: 0.2
-  segmentation: 0.2
+  # enhancement: 0.4
+  detection: 0.5
+  # small_targets: 0.2
+  segmentation: 0.5
 
 num_val_visualizations_per_task: 10
 
@@ -22,7 +22,7 @@ hyper_parameters:
   lora_rank_unet: 32
   prompt_len: 1
   current_task: ${task_type}
-  task_list: ['enhancement', 'detection', 'small_targets', 'segmentation']
+  task_list: ['detection', 'segmentation']
 
 train:
   enhancement:
@@ -30,8 +30,8 @@ train:
     queue_size: 180
     degradation_synthetic: True
 
-    dataroot_gt: ['path/to/MH-TIR/train_GT']
-    dataroot_lq: ['path/to/MH-TIR/train_GT']
+    dataroot_gt: ['/data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/train_GT']
+    dataroot_lq: ['/data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/train_GT']
 
     crop_size: 512
     io_backend:
@@ -45,9 +45,9 @@ train:
     queue_size: 180
     degradation_synthetic: True
 
-    dataroot_gt: ['path/to/M3FD/images/train']
-    dataroot_lq: ['path/to/M3FD/images/train']
-    dataroot_label: ['path/to/M3FD/labels/train']
+    dataroot_gt: ['/data/matengyu/data/Infrared/OD/M3FD_yolo/images/train']
+    dataroot_lq: ['/data/matengyu/data/Infrared/OD/M3FD_yolo/images/train']
+    dataroot_label: ['/data/matengyu/data/Infrared/OD/M3FD_yolo/labels/train'] 
 
     crop_size: 512
     io_backend:
@@ -61,9 +61,9 @@ train:
     queue_size: 180
     degradation_synthetic: True
 
-    dataroot_gt: ['path/to/SIRST3/imgs/train']
-    dataroot_lq: ['path/to/SIRST3/imgs/train']
-    dataroot_label: ['path/to/SIRST3/masks_train']
+    dataroot_gt: ['/data/matengyu/data/Infrared/IRSTD/SIRST3/imgs/train']
+    dataroot_lq: ['/data/matengyu/data/Infrared/IRSTD/SIRST3/imgs/train']
+    dataroot_label: ['/data/matengyu/data/Infrared/IRSTD/SIRST3/masks_train']
 
     crop_size: 512
     io_backend:
@@ -77,9 +77,9 @@ train:
     queue_size: 180
     degradation_synthetic: True
 
-    dataroot_gt: ['path/to/FMB/train/Infrared']
-    dataroot_lq: ['path/to/FMB/train/Infrared']
-    dataroot_label: ['path/to/FMB/train/Label']
+    dataroot_gt: ['/data/matengyu/data/Infrared/SS/FMB/train/Infrared']
+    dataroot_lq: ['/data/matengyu/data/Infrared/SS/FMB/train/Infrared']
+    dataroot_label: ['/data/matengyu/data/Infrared/SS/FMB/train/Label']  
 
     crop_size: 512
     io_backend:
@@ -87,14 +87,15 @@ train:
 
     use_hflip: True
     use_rot: False
+
 
 validation:
   enhancement:
     task_type: enhancement
     degradation_synthetic: True
 
-    dataroot_gt: path/to/MH-TIR/test_GT
-    dataroot_lq: path/to/MH-TIR/test_GT
+    dataroot_gt: /data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/test_GT
+    dataroot_lq: /data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/test_GT
 
     crop_size: 512
     io_backend:
@@ -107,9 +108,9 @@ validation:
     task_type: detection
     degradation_synthetic: True
 
-    dataroot_gt: path/to/M3FD/images/val
-    dataroot_lq: path/to/M3FD/images/val
-    dataroot_label: path/to/M3FD/labels/val
+    dataroot_gt: '/data/matengyu/data/Infrared/OD/M3FD_yolo/images/val'
+    dataroot_lq: '/data/matengyu/data/Infrared/OD/M3FD_yolo/images/val'
+    dataroot_label: '/data/matengyu/data/Infrared/OD/M3FD_yolo/labels/val'
 
     crop_size: 512
     io_backend:
@@ -122,9 +123,9 @@ validation:
     task_type: small_targets
     degradation_synthetic: True
 
-    dataroot_gt: path/to/SIRST3/imgs/val
-    dataroot_lq: path/to/SIRST3/imgs/val
-    dataroot_label: path/to/SIRST3/masks_val
+    dataroot_gt: '/data/matengyu/data/Infrared/IRSTD/SIRST3/imgs/val'
+    dataroot_lq: '/data/matengyu/data/Infrared/IRSTD/SIRST3/imgs/val'
+    dataroot_label: '/data/matengyu/data/Infrared/IRSTD/SIRST3/masks_val'
 
     crop_size: 512
     io_backend:
@@ -137,9 +138,9 @@ validation:
     task_type: segmentation
     degradation_synthetic: True
 
-    dataroot_gt: path/to/FMB/val/Infrared
-    dataroot_lq: path/to/FMB/val/Infrared
-    dataroot_label: path/to/FMB/val/Label
+    dataroot_gt: '/data/matengyu/data/Infrared/SS/FMB/val/Infrared'
+    dataroot_lq: '/data/matengyu/data/Infrared/SS/FMB/val/Infrared'
+    dataroot_label: '/data/matengyu/data/Infrared/SS/FMB/val/Label'
 
     crop_size: 512
     io_backend:

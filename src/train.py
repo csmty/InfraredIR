@@ -35,14 +35,31 @@ def safe_mean(x):
     return float(np.mean(x)) if len(x) > 0 else 0.0
 
 
+def set_model_task(accelerator, model, task_type, train_mode):
+    """Set the task prompt state on the unwrapped model before a task batch."""
+    unwrapped_model = accelerator.unwrap_model(model)
+    unwrapped_model.set_current_task(task_type)
+    if train_mode:
+        unwrapped_model.set_train()
+    else:
+        unwrapped_model.set_eval()
+    return unwrapped_model
+
+
+def get_task_prompt(task_prompts, task_type, default_prompt):
+    """Return the configured task prompt, falling back to the CLI prompt."""
+    if task_prompts is None:
+        return default_prompt
+    return task_prompts.get(task_type, default_prompt)
+
+
 def main(args):
-    # init and save configs
     config = OmegaConf.load(args.base_config)
     hyper_parameters = config.get("hyper_parameters", {})
     STAGE = hyper_parameters.get("stage", "Stage1")
+    lambda_snr = float(hyper_parameters.get("lambda_snr", 10.0))
 
-    # Multi-task settings are read from the config file.
-    # Prefer hyper_parameters.task_list because your original config already keeps task_list there.
+    # Each optimization step samples one task, then draws a full batch from that task.
     task_list = list(hyper_parameters.get("task_list", []))
     if len(task_list) == 0:
         task_list = list(config.train.keys())
@@ -93,7 +110,6 @@ def main(args):
         for task_name in task_list:
             os.makedirs(os.path.join(args.output_dir, "eval", task_name), exist_ok=True)
 
-    # initialize net_iir
     net_iir = InfraredIR(opt=hyper_parameters, sd_path=sd_path, pretrained_path=args.pretrained_path)
     net_iir.set_train()
 
@@ -115,16 +131,21 @@ def main(args):
     net_lpips.requires_grad_(False)
     dwt_loss = DWTLoss().cuda()
 
-    # task-specific components
+    # Frozen downstream task models provide task-aware losses for non-enhancement tasks.
     task_ctx = {}
     for task_name in task_list:
         task_ctx[task_name] = build_task_components(task_name, args)
 
-    # make the optimizer
     layers_to_opt = []
+    prompt_params = (
+        list(net_iir.task_prompts.parameters())
+        if hasattr(net_iir, "task_prompts")
+        else net_iir.prompt_parameters()
+    )
     if STAGE == 'Stage1':
+        # Stage1 trains shared restoration adapters plus task prompts.
         layers_to_opt = layers_to_opt + list(net_iir.fuser.parameters()) + list(net_iir.t_head.parameters()) + \
-            list(net_iir.prompt_mlp.parameters()) + net_iir.prompt_parameters()
+            list(net_iir.prompt_mlp.parameters()) + prompt_params
 
         for n, _p in net_iir.unet.named_parameters():
             if "lora" in n:
@@ -138,18 +159,11 @@ def main(args):
                 layers_to_opt.append(_p)
 
     elif STAGE == 'Stage2':
+        # Stage2 keeps the restoration backbone frozen and adapts prompts only.
         layers_to_opt = layers_to_opt + net_iir.prompt_parameters()
-        # for n, _p in net_iir.vae.named_parameters():
-        #     if "lora" in n and "decoder" in n:
-        #         assert _p.requires_grad
-        #         layers_to_opt.append(_p)
     else:
         raise ValueError(f"Unsupported stage: {STAGE}")
 
-    # dataset and dataloader
-    # The yaml structure is expected to be:
-    # train.enhancement / train.detection / train.small_targets / train.segmentation
-    # validation.enhancement / validation.detection / validation.small_targets / validation.segmentation
     dataset_train = {}
     dataset_val = {}
     dl_train = {}
@@ -164,7 +178,6 @@ def main(args):
         train_cfg = config.train[task_name]
         val_cfg = config.validation[task_name]
 
-        # Keep each sub-config self-contained for PairedDataset.
         if "task_type" not in train_cfg:
             train_cfg.task_type = task_name
         if "task_type" not in val_cfg:
@@ -206,7 +219,7 @@ def main(args):
         power=args.lr_power,
     )
 
-    # accelerator prepare
+    # Prepare the restoration model, optimizer, schedulers, and task dataloaders together.
     prepare_objects = [net_iir, optimizer, lr_scheduler]
     small_targets_model_index = None
     if "small_targets" in task_ctx and task_ctx["small_targets"].get("task_model", None) is not None:
@@ -234,7 +247,6 @@ def main(args):
     for idx, task_name in enumerate(task_list):
         dl_val[task_name] = prepared[val_dl_start_index + idx]
 
-    # renorm with image net statistics
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
         weight_dtype = torch.float16
@@ -268,7 +280,8 @@ def main(args):
 
     for epoch in range(args.num_training_epochs):
         while global_step < args.max_train_steps:
-            task_type = np.random.choice(task_list, p=task_probs)
+            # A batch is task-homogeneous; multi-task learning happens across steps.
+            task_type = str(np.random.choice(task_list, p=task_probs))
 
             try:
                 batch = next(train_iter[task_type])
@@ -277,34 +290,34 @@ def main(args):
                 batch = next(train_iter[task_type])
 
             with accelerator.accumulate(net_iir):
-                net_iir.set_train()
-
-                # Let the model or router know the current task if such fields/methods exist.
-                unwrapped_net = accelerator.unwrap_model(net_iir)
-                if hasattr(unwrapped_net, "set_current_task"):
-                    unwrapped_net.set_current_task(task_type)
-                elif hasattr(unwrapped_net, "current_task"):
-                    unwrapped_net.current_task = task_type
-                if hasattr(unwrapped_net, "opt") and isinstance(unwrapped_net.opt, dict):
-                    unwrapped_net.opt["current_task"] = task_type
+                set_model_task(accelerator, net_iir, task_type, train_mode=True)
 
                 x_src = batch["lq"]
                 x_tgt = batch["gt"]
 
                 B = x_src.shape[0]
-                task_prompt = task_prompts.get(task_type, args.pos_prompt) if task_prompts is not None else args.pos_prompt
+                task_prompt = get_task_prompt(task_prompts, task_type, args.pos_prompt)
                 pos_tag_prompt = [task_prompt for _ in range(B)]
 
-                x_tgt_pred = net_iir(x_src.detach(), pos_tag_prompt)
+                x_tgt_pred, loss_snr = net_iir(
+                    x_src.detach(),
+                    pos_tag_prompt,
+                    hq_for_snr=x_tgt.detach(),
+                    in_latent=False,
+                )
 
                 loss_l2 = F.mse_loss(x_tgt_pred.float(), x_tgt.detach().float(), reduction="mean",) * args.lambda_l2
                 loss_lpips = net_lpips(x_tgt_pred.float(), x_tgt.detach().float(),).mean() * args.lambda_lpips
                 loss_dwt = dwt_loss(x_tgt_pred.float(), x_tgt.detach().float())
+                if global_step > 100:
+                    lambda_snr = 0
+                loss_snr = loss_snr * lambda_snr
 
                 if task_type == "enhancement":
                     loss_task = torch.zeros((), device=x_tgt_pred.device, dtype=x_tgt_pred.dtype)
                     task_outputs = {}
                 else:
+                    # Task loss backpropagates through the restored image into InfraredIR.
                     loss_task, task_outputs = compute_task_loss(
                         task_type=task_type,
                         task_ctx=task_ctx[task_type],
@@ -312,7 +325,7 @@ def main(args):
                         batch=batch,
                     )
 
-                loss = loss_l2 + loss_lpips + loss_dwt + loss_task
+                loss = loss_l2 + loss_lpips + loss_dwt + loss_snr + loss_task
 
                 accelerator.backward(loss, retain_graph=False)
 
@@ -333,15 +346,18 @@ def main(args):
                         f"train/{task_type}/loss_l2": loss_l2.detach().item(),
                         f"train/{task_type}/loss_lpips": loss_lpips.detach().item(),
                         f"train/{task_type}/loss_dwt": loss_dwt.detach().item(),
+                        f"train/{task_type}/loss_snr": loss_snr.detach().item(),
                         f"train/{task_type}/loss_task": loss_task.detach().item(),
                         "loss_l2": loss_l2.detach().item(),
                         "loss_lpips": loss_lpips.detach().item(),
                         "loss_dwt": loss_dwt.detach().item(),
+                        "loss_snr": loss_snr.detach().item(),
                         "loss_task": loss_task.detach().item(),
                     }
                     progress_bar.set_postfix(
                         task=task_type,
                         loss_l2=logs["loss_l2"],
+                        loss_snr=logs["loss_snr"],
                         loss_task=logs["loss_task"],
                     )
 
@@ -369,19 +385,17 @@ def main(args):
                                 assert B == 1, "Use batch size 1 for eval."
 
                                 with torch.no_grad():
-                                    net_iir.set_eval()
+                                    # Validation uses the prompt and train/eval state of the current task.
+                                    unwrapped_net = set_model_task(
+                                        accelerator,
+                                        net_iir,
+                                        val_task_type,
+                                        train_mode=False,
+                                    )
 
-                                    unwrapped_net = accelerator.unwrap_model(net_iir)
-                                    if hasattr(unwrapped_net, "set_current_task"):
-                                        unwrapped_net.set_current_task(val_task_type)
-                                    elif hasattr(unwrapped_net, "current_task"):
-                                        unwrapped_net.current_task = val_task_type
-                                    if hasattr(unwrapped_net, "opt") and isinstance(unwrapped_net.opt, dict):
-                                        unwrapped_net.opt["current_task"] = val_task_type
-
-                                    task_prompt = task_prompts.get(val_task_type, args.pos_prompt) if task_prompts is not None else args.pos_prompt
+                                    task_prompt = get_task_prompt(task_prompts, val_task_type, args.pos_prompt)
                                     pos_tag_prompt = [task_prompt for _ in range(B)]
-                                    x_tgt_pred = accelerator.unwrap_model(net_iir)(x_src.detach(), pos_tag_prompt)
+                                    x_tgt_pred = unwrapped_net(x_src.detach(), pos_tag_prompt)
 
                                     loss_l2_val = F.mse_loss(
                                         x_tgt_pred.float(),
