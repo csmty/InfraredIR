@@ -26,3 +26,6 @@ checkpoints/
 # Local editor and OS files
 .vscode/
 .DS_Store
+
+# Local helper scripts and logs
+00.sh
