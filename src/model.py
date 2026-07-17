@@ -78,10 +78,11 @@ def make_frontloaded_indices(num_train_timesteps=1000, n=100, gamma=2.5, final_s
 class InfraredIR(torch.nn.Module):
     def __init__(self, sd_path=None, pretrained_path=None, opt=None):
         super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.tokenizer = AutoTokenizer.from_pretrained(sd_path, subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained(sd_path, subfolder="text_encoder").cuda()
+        self.text_encoder = CLIPTextModel.from_pretrained(sd_path, subfolder="text_encoder").to(self.device)
         self.noise_scheduler = DDPMScheduler.from_pretrained(sd_path, subfolder="scheduler")
-        self.sched = make_1step_sched(sd_path)
+        self.sched = make_1step_sched(sd_path, device=self.device)
 
         self.opt = opt
         self.stage = opt.get('stage', 'Stage1')
@@ -93,7 +94,7 @@ class InfraredIR(torch.nn.Module):
             torch.tensor(
                 make_frontloaded_indices(num_train_timesteps=num_train_ts, n=self.N_timesteps, gamma=2.5, final_step=1),
                 dtype=torch.long,
-                device="cuda",
+                device=self.device,
             ),
             persistent=True,
         )
@@ -104,8 +105,8 @@ class InfraredIR(torch.nn.Module):
         vae = AutoencoderKL.from_pretrained(sd_path, subfolder="vae")
         unet = UNet2DConditionModel.from_pretrained(sd_path, subfolder="unet")
 
-        unet.to("cuda")
-        vae.to("cuda")
+        unet.to(self.device)
+        vae.to(self.device)
         self.unet, self.vae = unet, vae
         self.text_encoder.requires_grad_(False)
 
@@ -113,8 +114,8 @@ class InfraredIR(torch.nn.Module):
         self.fuser = FuseHead(
             in_chs=[128, 256, 512, 512],
             out_ch_latent=128
-        ).cuda()
-        self.t_head = TimestepHead(c_lat=128, txt_dim=0).cuda()
+        ).to(self.device)
+        self.t_head = TimestepHead(c_lat=128, txt_dim=0).to(self.device)
         self.hookbank = HookBank()
         self._register_vae_hooks()
 
@@ -194,7 +195,7 @@ class InfraredIR(torch.nn.Module):
         self._patch_prompt_modulated_lora(vae, self.vae_encoder_lora_layers)
         self._patch_prompt_modulated_lora(unet, self.unet_lora_layers)
 
-        self.prompt_mlp = self._build_prompt_mlp(self._prompt_modulation_dim()).cuda()
+        self.prompt_mlp = self._build_prompt_mlp(self._prompt_modulation_dim()).to(self.device)
         self.prompt_mlp.apply(self._init_weights)
         if checkpoint is not None:
             self._load_matching_state_dict(self.prompt_mlp, checkpoint["state_dict_prompt_mlp"])

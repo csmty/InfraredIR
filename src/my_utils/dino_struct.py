@@ -168,7 +168,8 @@ class VitExtractor:
 
 class DinoStructureLoss:
     def __init__(self, ):
-        self.extractor = VitExtractor(model_name="dino_vitb8", device="cuda")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.extractor = VitExtractor(model_name="dino_vitb8", device=self.device)
         self.preprocess = torchvision.transforms.Compose([
             torchvision.transforms.Resize(224),
             torchvision.transforms.ToTensor(),

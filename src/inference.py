@@ -2,7 +2,6 @@ import sys
 import os
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, project_root)
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import gc
 import tqdm
 import math
@@ -95,7 +94,7 @@ def main(args):
         lq_path = batch_val['lq_path'][0]
         (path, name) = os.path.split(lq_path)
 
-        im_lq = batch_val['lq'].cuda()
+        im_lq = batch_val['lq'].to(accelerator.device)
         im_lq = im_lq.to(memory_format=torch.contiguous_format).float()    
 
         im_lq_resize = im_lq.contiguous() 

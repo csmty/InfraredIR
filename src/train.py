@@ -127,9 +127,9 @@ def main(args):
     if args.allow_tf32:
         torch.backends.cuda.matmul.allow_tf32 = True
 
-    net_lpips = lpips.LPIPS(net="vgg").cuda()
+    net_lpips = lpips.LPIPS(net="vgg")
     net_lpips.requires_grad_(False)
-    dwt_loss = DWTLoss().cuda()
+    dwt_loss = DWTLoss()
 
     # Frozen downstream task models provide task-aware losses for non-enhancement tasks.
     task_ctx = {}
@@ -255,6 +255,7 @@ def main(args):
 
     net_iir.to(accelerator.device, dtype=weight_dtype)
     net_lpips.to(accelerator.device, dtype=weight_dtype)
+    dwt_loss.to(accelerator.device, dtype=weight_dtype)
 
     for task_name in task_list:
         task_ctx[task_name] = move_task_components_to_device(

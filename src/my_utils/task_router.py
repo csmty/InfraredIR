@@ -68,8 +68,9 @@ def _build_enhancement_components(args):
 def _build_detection_components(args):
     yolo_path = _require_arg(args, "yolo_weight", "detection")
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     net_yolo = YOLO(yolo_path)
-    net_yolo.to("cuda")
+    net_yolo.to(device)
     net_yolo.eval()
 
     class_names = net_yolo.names if hasattr(net_yolo, "names") else None

@@ -7,15 +7,18 @@ from typing import Any, Optional, Union
 
 # def make_1step_sched(pretrained_path, step=4):
 #     noise_scheduler_1step = EulerDiscreteScheduler.from_pretrained(pretrained_path, subfolder="scheduler")
-#     noise_scheduler_1step.set_timesteps(step, device="cuda")
-#     noise_scheduler_1step.alphas_cumprod = noise_scheduler_1step.alphas_cumprod.cuda()
+#     noise_scheduler_1step.set_timesteps(step, device=target_device)
+#     noise_scheduler_1step.alphas_cumprod = noise_scheduler_1step.alphas_cumprod.to(target_device)
     # return noise_scheduler_1step
 
 
-def make_1step_sched(pretrained_path):
+def make_1step_sched(pretrained_path, device=None):
+    target_device = torch.device(device) if device is not None else torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
     noise_scheduler_1step = DDPMScheduler.from_pretrained(pretrained_path, subfolder="scheduler")
-    noise_scheduler_1step.set_timesteps(1, device="cuda")
-    noise_scheduler_1step.alphas_cumprod = noise_scheduler_1step.alphas_cumprod.cuda()
+    noise_scheduler_1step.set_timesteps(1, device=target_device)
+    noise_scheduler_1step.alphas_cumprod = noise_scheduler_1step.alphas_cumprod.to(target_device)
     return noise_scheduler_1step
 
 

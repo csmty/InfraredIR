@@ -185,7 +185,7 @@ class PlainDataset(data.Dataset):
 
 
 def lr_proc(config, batch, device):
-    im_lr = batch['lr'].cuda()
+    im_lr = batch['lr'].to(device)
     im_lr = im_lr.to(memory_format=torch.contiguous_format).float()    
 
     ori_lr = im_lr
