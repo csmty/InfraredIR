@@ -7,12 +7,16 @@ export PYTHONPATH="${PROJECT_ROOT}/src:${PROJECT_ROOT}:${PYTHONPATH}"
 export NCCL_P2P_DISABLE=1
 export NCCL_IB_DISABLE=1
 
-accelerate launch --num_processes=1 --gpu_ids="1," --main_process_port 29300 src/train.py \
-    --sd_path="/data/matengyu/code/@submit/Infrared/CVPR26/S3Diff/weight/sd-turbo/models--stabilityai--sd-turbo/snapshots/sd-turbo" \
+SD_TURBO_PATH="/path/to/sd-turbo"
+PRETRAINED_PATH="/path/to/stage1_or_base_checkpoint.pkl"
+OUTPUT_DIR="./experiments/stage1_single"
+
+accelerate launch --num_processes=1 --gpu_ids="0," --main_process_port 29300 src/train.py \
+    --sd_path="${SD_TURBO_PATH}" \
     --base_config="configs/train_STAGE1_single.yaml" \
-    --output_dir="./experiments/stage1_single1" \
+    --output_dir="${OUTPUT_DIR}" \
     --resolution=512 \
     --train_batch_size=1 \
     --enable_xformers_memory_efficient_attention \
     --viz_freq=25 \
-    --pretrained_path="./experiments/stage1_single/checkpoints/model_29001.pkl"
+    --pretrained_path="${PRETRAINED_PATH}"

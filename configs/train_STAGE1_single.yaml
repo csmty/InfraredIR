@@ -24,8 +24,8 @@ train:
     queue_size: 180
     degradation_synthetic: True
 
-    dataroot_gt: ['/data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/train_GT']
-    dataroot_lq: ['/data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/train_GT']
+    dataroot_gt: ['/path/to/HM-TIR/train_GT']
+    dataroot_lq: ['/path/to/HM-TIR/train_GT']
 
     crop_size: 512
     io_backend:
@@ -40,8 +40,8 @@ validation:
     task_type: enhancement
     degradation_synthetic: True
 
-    dataroot_gt: /data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/test_GT
-    dataroot_lq: /data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/test_GT
+    dataroot_gt: /path/to/HM-TIR/test_GT
+    dataroot_lq: /path/to/HM-TIR/test_GT
 
     crop_size: 512
     io_backend:

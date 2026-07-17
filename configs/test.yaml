@@ -12,10 +12,10 @@ hyper_parameters:
   task_list: ['enhancement', 'detection', 'small_targets', 'segmentation']
 
 validation:
-  lq_path: /data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/test_LQ/composited_hard
-  # lq_path: /data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/Detection
-  # lq_path: /data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/Segmentation
-  # lq_path: /data/matengyu/data/Infrared/MH-TIR/imgs_Spilt/newdata/SmallTarget_val
+  lq_path: /path/to/HM-TIR/test_LQ
+  # lq_path: /path/to/detection/images
+  # lq_path: /path/to/segmentation/images
+  # lq_path: /path/to/small_target/images
 
   # lq_path: path/to/LQ
 

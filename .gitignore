@@ -1,0 +1,28 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Runtime outputs
+experiments/
+output/
+outputs/
+runs/
+wandb/
+nohup.out
+*.log
+
+# Checkpoints and model weights
+weight/
+weights/
+checkpoints/
+*.pt
+*.pth
+*.pth.tar
+*.pkl
+*.ckpt
+*.safetensors
+
+# Local editor and OS files
+.vscode/
+.DS_Store
